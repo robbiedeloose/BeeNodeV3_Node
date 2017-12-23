@@ -7,7 +7,7 @@
 #include <SPI.h>         //nRF24L01 uses SPI communication
 
 byte nodeId[4];
-byte nodeAddress = 0;
+byte nodeAddress = 1;
 float iREF = 1.1;
 
 void getNodeId() {
