@@ -13,12 +13,16 @@
 
 #include <arduino.h>
 
+#include "BeeNode.h"
 #include <DallasTemperature.h> // for ds18
 #include <EEPROM.h>            //EEPROM functions
 #include <OneWire.h>           //for ds18
 #include <RF24.h> //Library for nRF24L01, using version https://github.com/TMRh20/RF24
 #include <RF24Network.h> //Library for networking nRF24L01s, using version https://github.com/TMRh20/RF24Network
 #include <SPI.h>         //nRF24L01 uses SPI communication
+
+#include "RandomNodeId.h"
+RandomNodeId beeNodeId;
 
 // node specific declarations
 #define ledPin 13
@@ -27,6 +31,7 @@ bool config = FALSE;
 byte nodeId[4];
 byte nodeAddress = 1;
 float iREF = 1.1;
+NodeData_t beeNodeData;
 
 // One wire definitions
 #define ONE_WIRE_BUS A0
@@ -38,31 +43,6 @@ int const numberOfSensors = 3;
 byte deviceAddress[numberOfSensors][8]; // address aray
 int foundDevices = 0;                   // Number of temperature devices found
 float temperatures[numberOfSensors];
-
-// NODE ID in EEPRom - 4 Bytes /////////////////////////////////////////////////
-void getNodeId() {
-  // char firstByte = EEPROM.read(1);
-  DEBUG_PRINT("First byte: ");
-  DEBUG_PRINTLN(EEPROM.read(1));
-  if (EEPROM.read(1) == '#') {
-    DEBUG_PRINT("Node id: ");
-    for (int i = 0; i < 4; i++) {
-      nodeId[i] = EEPROM.read(i + 2);
-      DEBUG_PRINTHEX(nodeId[i]);
-    }
-    Serial.println();
-  } else {
-    DEBUG_PRINTLN("Address not set. Generating code...");
-    randomSeed(analogRead(A0));
-    for (int i = 0; i < 4; i++) {
-      nodeId[i] = random(255);
-      EEPROM.write(i + 2, nodeId[i]);
-      DEBUG_PRINTHEX(nodeId[i]);
-    }
-    DEBUG_PRINTLN();
-    EEPROM.write(1, '#');
-  }
-}
 
 // NODE ADDRESS from pin headers ///////////////////////////////////////////////
 void getNodeAdress() {
@@ -121,7 +101,6 @@ void printDS18AddressesArray() {
 // function to print a device address
 void printDS18Addresses() {
   int startByte = 6;
-  Serial.println("-----------------------");
   for (int a = 0; a < numberOfSensors; a++) {
     for (int i = 0; i < 8; i++) {
       Serial.print(EEPROM.read(i + startByte + (8 * a)), HEX);
@@ -129,7 +108,6 @@ void printDS18Addresses() {
     }
     Serial.println();
   }
-  Serial.println("-----------------------");
 }
 
 bool checkAndSaveDS18Address(DeviceAddress tempAddress) {
@@ -175,12 +153,13 @@ bool checkAndSaveDS18Address(DeviceAddress tempAddress) {
   return false;
 }
 
-void getTemperatures() {
+void getTemperatures(NodeData_t *nodeData) {
   sensors.requestTemperatures(); // Send the command to get temperatures
   delay(200);
   for (int a = 0; a < numberOfSensors; a++) {
     // delay(200);
     temperatures[a] = sensors.getTempC(deviceAddress[a]);
+    nodeData->hiveTemps[a] = temperatures[a];
     Serial.print("Sensor ");
     Serial.print(a + 1);
     Serial.print(": ");
@@ -268,7 +247,6 @@ void initNode() {
   pinMode(configButton, INPUT_PULLUP);
   pinMode(ledPin, OUTPUT);
   // Get ID and Address
-  getNodeId();
   getNodeAdress();
   // Set voltage reference
   analogReference(INTERNAL); // set the ADC reference to internal 1.1V reference
@@ -283,15 +261,65 @@ void initTempSensors() {
   printDS18AddressesArray();
 }
 
+void set_temp_struct(NodeData_t *nodeData) {
+  nodeData->hiveTemps[0] = 1;
+  nodeData->hiveTemps[1] = 2;
+  nodeData->hiveTemps[2] = 3;
+}
+
+void print_temp_struct(NodeData_t *nodeData) {
+  Serial.print("struct temp 1:");
+  Serial.println(nodeData->hiveTemps[0]);
+  Serial.print("struct temp 2:");
+  Serial.println(nodeData->hiveTemps[1]);
+  Serial.print("struct temp 3:");
+  Serial.println(nodeData->hiveTemps[2]);
+}
 ////////////////////////////////////////////////////////////////////////////////
 // SETUP AND LOOP //////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////
 
 void setup() {
   Serial.begin(38400);
+#ifdef DEBUG
   while (!Serial) {
     ; // wait for serial port to connect. Needed for native USB port only
   }
+#endif
+
+  /*
+  This data should be printed when started or if we go in and out of config mode
+
+  BeeNode v3.0.1a Node (or gateway or coordinator)
+  -----------------------------------------
+  NodeId: 56F7E790
+  NodeAddress: 1
+  -----------------------------------------
+  DS18B20 sensors
+  number of sensors: 3
+  id 1: 56F7E79056F7E790
+  id 2: 56F7E79056F7E790
+  id 3: 56F7E79056F7E790
+  -----------------------------------------
+  humidity sensor
+  present: false
+  -----------------------------------------
+  Scale sensor
+  present: FALSE
+  -----------------------------------------
+  Vref: 1.1
+  -----------------------------------------
+  change settings? y/n
+
+  */
+  byte someByte[4];
+  beeNodeId.getId(someByte);
+  Serial.println("DeviceId:");
+  for (byte b : someByte)
+    Serial.print(b, HEX);
+  Serial.println();
+  delay(5000);
+
   initNode();
   initTempSensors();
   Serial.println("-addresses in eeprom---------------------------------------");
@@ -310,7 +338,13 @@ void loop() {
     Serial.print("battery voltage: ");
     Serial.println(fReadVcc());
     // float a = checkBatteryVolt();
-    getTemperatures();
+    getTemperatures(&beeNodeData);
+
+    // set_temp_struct(&beeNodeData);
+    Serial.println();
+    Serial.println("---------------------------------------------------------");
+    print_temp_struct(&beeNodeData);
+    Serial.println("---------------------------------------------------------");
     delay(2000);
   } else {
     runConfig();
