@@ -7,6 +7,7 @@ class MesureVoltageInternal {
 public:
   MesureVoltageInternal(float iREF);
   float getVoltage();
+  void setRefInternal();
 
 private:
   void burn8Readings();

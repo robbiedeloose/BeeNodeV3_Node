@@ -38,3 +38,8 @@ void MesureVoltageInternal::burn8Readings() {
     analogRead(A1);
   }
 }
+
+void MesureVoltageInternal::setRefInternal() {
+  analogReference(INTERNAL); // set the ADC reference to internal 1.1V reference
+  burn8Readings(); // make 8 readings but don't use them to ensure good reading after ADC reference change
+}
