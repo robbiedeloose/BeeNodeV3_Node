@@ -1,4 +1,3 @@
-
 #define DEBUG
 
 #ifdef DEBUG
@@ -20,10 +19,20 @@
 #include <RF24Network.h> //Library for networking nRF24L01s, using version https://github.com/TMRh20/RF24Network
 #include <SPI.h>         //nRF24L01 uses SPI communication
 
-// node specific declarations //
-#define ledPin 5
+// Pins
+#define ledPin 6 // might change to buzzerPin
 #define configButton 4
-NodeData_t beeNodeData;
+#define radioPin1 7
+#define radioPin2 8
+#define addressPin1 A1
+#define addressPin2 A2
+#define addressPin3 A3
+#define alarmPin 3
+#define seedRef A0
+#define oneWirePin 5
+
+// node specific declarations //
+//NodeData_t beeNodeData; --------------------
 uint8_t nodeAddress = 1;
 
 // EEPROM address locations //
@@ -43,10 +52,10 @@ MesureVoltageInternal battery(iREF);
 // One wire definitions //
 #include <DallasTemperature.h>
 #include <OneWire.h>
-#define ONE_WIRE_BUS A0
-#define TEMPERATURE_PRECISION 10 // 9, 10 - adjust wait time accordingly
+// #define ONE_WIRE_BUS A0
+int tempResolution = 10; // 9, 10 - adjust wait time accordingly
 int waitForConversion = 200;
-OneWire oneWire(ONE_WIRE_BUS);
+OneWire oneWire(oneWirePin);
 DallasTemperature sensors(&oneWire);
 DeviceAddress tempDeviceAddress; // temporary addresses to save found sensor to
 #define numberOfSensors 3
@@ -55,94 +64,93 @@ int foundDevices = 0; // Number of temperature devices found
 float temperatures[numberOfSensors];
 bool firstTimeThroughSaveLoop = true; // remove line above
 
-// RF CODE /////////////////////////////////////////////////////////////////////
+// RF24 declarations //
 RF24 radio(7, 8); // create object to control and communicate with nRF24L01
 RF24Network network(radio); // Create object to use nRF24L01 in mesh network
 const uint16_t rXNode = 00; // address of coordinator
 // structure used to hold the payload that is sent to the coordinator.
-// Currently setup to send temp value as float, ADC value as int, and battery
-// state as bool
-// Can be adjusted to accomodate the exact data you want node to send
-// Keep in mind the more data you send the more power is used and the more
-// likely
-// there is some kind of data error in the transmit receive process
-struct payload_t {
+struct payload_example_t {
   float aDCTemp; // temperature from onboard sensor
   bool batState; // bool to communicate battery power level, true is good and
                  // false means battery needs to be replaced
 };
-struct payload2_t {
+
+// structure used to hold the payload that is sent to the coordinator.
+struct payload_t {
   uint8_t id[4];
-  float temp[numberOfSensors]; // temperature from onboard sensor
+  float temp[numberOfSensors];
   float bat;
 };
+payload_t payload; // Payload to send
 
-void fillPayload(payload2_t *payload) {
+// RF25 Radio CODE
+// /////////////////////////////////////////////////////////////////////
+void collectData(payload_t *payloadAddress) {
+  for (uint8_t i = 0; i < 4; i++) // fill nodeId
+    payloadAddress->id[i] = nodeId[i];
+  sensors.requestTemperatures(); // Send the command to get temperatures
+  delay(waitForConversion);
+  for (uint8_t a = 0; a < numberOfSensors; a++) // temperature values
+    payloadAddress->temp[a] = sensors.getTempC(deviceAddresses[a]);
+  payloadAddress->bat = battery.getVoltage(); // Battery
+}
+
+void showData(payload_t *payloadAddress) {
+  Serial.print("Device Id: "); // Show devide id
   for (uint8_t i = 0; i < 4; i++)
-    payload->id[i] = nodeId[i];
-  for (uint8_t i = 0; i < numberOfSensors; i++)
-    payload->temp[i] = temperatures[i];
-  payload->bat = 1.2345; // battery.getVoltage();
+    Serial.print(nodeId[i]);
+  Serial.println();
+  Serial.print("Device Address: ");
+  Serial.println(nodeAddress); // Show device address
+  Serial.println("DS18b20 temp sensors");
+  for (int i; i < numberOfSensors; i++) { // Show DS sensors data
+    Serial.print("temp : ");
+    Serial.print(i + 1);
+    Serial.print(": ");
+    if (payloadAddress->temp[i] != -127.00)
+      Serial.println(payloadAddress->temp[i]);
+    else
+      Serial.println("not present");
+  }
+  Serial.print("Battery: ");
+  Serial.println(payloadAddress->bat); // Show battery info
+  Serial.println();
 }
 
-void setupRadio() {
-  SPI.begin();   // Start SPI communication
-  radio.begin(); // start nRF24L01 communication and control
-  // radio.setRetries(0,0);
-  // setup network communication, first argument is channel which determines
-  // frequency band module communicates on. Second argument is address of this
-  // module
-  network.begin(90, nodeAddress);
-}
-
-void sendStuff() {
+bool sendData(payload_t *payloadAddress, int sizeOfPayload) { //<---------------------------- should edit it to accept
+  // pointer to struct as well, probably ad it with & in function
+  // header en remove the & within the function
   network.update(); // check to see if there is any network traffic that needs
                     // to be passed on, technically an end device does not need
                     // this
-  payload_t payload = {temperatures[0], true};
-  payload2_t payload2;
-  fillPayload(&payload2);
-  //
-
-  Serial.print("Battery: ");
-  Serial.println(payload2.bat);
-  Serial.print("temp 1: ");
-  Serial.println(payload2.temp[0]);
-
-  //
   RF24NetworkHeader header(rXNode); // Create transmit header. This goes in
                                     // transmit packet to help route it where it
                                     // needs to go, in this case it is the
                                     // coordinator
   // send data onto network and make sure it gets there1
-  if (network.write(header, &payload2, sizeof(payload2)))
-    Serial.println("Succes!");
+  if (network.write(header, payloadAddress, sizeOfPayload))
+    return true;
   else
-    Serial.println("Failed!");
+    return false;
 }
 
 // NODE ADDRESS from pin headers ///////////////////////////////////////////////
 uint8_t getNodeAdress() {
-  // pinMode(5, INPUT_PULLUP);
-  // pinMode(6, INPUT_PULLUP);
-  // pinMode(7, INPUT_PULLUP);
-
+  pinMode(addressPin1, INPUT_PULLUP);
+  pinMode(addressPin2, INPUT_PULLUP);
+  pinMode(addressPin3, INPUT_PULLUP);
   uint8_t address = 0;
-  /*
-    if (digitalRead(5) == LOW) {
+    if (digitalRead(addressPin1) == LOW) {
       address = address + 1;
     }
-    if (digitalRead(6) == LOW) {
+    if (digitalRead(addressPin2) == LOW) {
       address = address + 2;
     }
-    if (digitalRead(7) == LOW) {
+    if (digitalRead(addressPin3) == LOW) {
       address = address + 3;
-    }*/
+    }
   if (address == 0)
     address = 1;
-
-  Serial.print("Node Address: ");
-  Serial.println(nodeAddress);
   return address;
 }
 
@@ -179,25 +187,14 @@ void printLoadedDS18Addresses() {
 void printSavedDS18Addresses() {
   int startByte = EEPRomDs18Ids;
   for (int a = 0; a < numberOfSensors; a++) {
+    Serial.print("Id ");
+    Serial.print(a + 1);
+    Serial.print(": ");
     for (int i = 0; i < 8; i++) {
       Serial.print(EEPROM.read(i + startByte + (8 * a)), HEX);
       Serial.print(" ");
     }
     Serial.println();
-  }
-}
-
-void getTemperatures(/*NodeData_t *nodeData*/) {
-  sensors.requestTemperatures(); // Send the command to get temperatures
-  delay(waitForConversion);
-  for (int a = 0; a < numberOfSensors; a++) {
-    // delay(200);
-    temperatures[a] = sensors.getTempC(deviceAddresses[a]);
-    // nodeData->hiveTemps[a] = temperatures[a];
-    Serial.print("Sensor ");
-    Serial.print(a + 1);
-    Serial.print(": ");
-    Serial.println(temperatures[a]);
   }
 }
 
@@ -276,14 +273,6 @@ void lookForNewDS18Sensors() {
 }
 
 // INIT FUNCTIONS //////////////////////////////////////////////////////////////
-
-void initTempSensors() {
-  loadDS18Addresses();
-  sensors.begin();
-  sensors.setResolution(10);
-  printLoadedDS18Addresses();
-}
-
 void initNode() {
   // Set pinmodes for config mode
   pinMode(configButton, INPUT_PULLUP);
@@ -293,86 +282,80 @@ void initNode() {
   nodeAddress = getNodeAdress();
   // Set voltage reference
   battery.setRefInternal();
-  //
-  initTempSensors();
-  loadDS18Addresses(); // send array to fill as parameter
 }
 
-void set_temp_struct(NodeData_t *nodeData) {
-  nodeData->hiveTemps[0] = 1;
-  nodeData->hiveTemps[1] = 2;
-  nodeData->hiveTemps[2] = 3;
+void initTempSensors() {
+  loadDS18Addresses();
+  sensors.begin();
+  sensors.setResolution(tempResolution);
 }
 
-void print_temp_struct(NodeData_t *nodeData) {
-  Serial.print("struct temp 1:");
-  Serial.println(nodeData->hiveTemps[0]);
-  Serial.print("struct temp 2:");
-  Serial.println(nodeData->hiveTemps[1]);
-  Serial.print("struct temp 3:");
-  Serial.println(nodeData->hiveTemps[2]);
+void initRadio() { //
+  SPI.begin();     // Start SPI communication
+  radio.begin();   // start nRF24L01 communication and control
+  // radio.setRetries(0,0);
+  // setup network communication, first argument is channel which determines
+  // frequency band module communicates on. Second argument is address of this
+  // module
+  network.begin(90, nodeAddress);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 void printConfig() {
-  Serial.println("DeviceId:");
+  Serial.println("BeeNode v3.0.1a Node");
+  Serial.println("-----------------------------------------");
+  Serial.print("Node Id: ");
   for (byte b : nodeId)
     Serial.print(b, HEX);
   Serial.println();
-  delay(5000);
-  /*
-  This data should be printed when started or if we go in and out of config mode
-
-  BeeNode v3.0.1a Node (or gateway or coordinator)
-  -----------------------------------------
-  NodeId: 56F7E790
-  NodeAddress: 1
-  -----------------------------------------
-  DS18B20 sensors
-  number of sensors: 3
-  id 1: 56F7E79056F7E790
-  id 2: 56F7E79056F7E790
-  id 3: 56F7E79056F7E790
-  -----------------------------------------
-  humidity sensor
-  present: false
-  -----------------------------------------
-  Scale sensor
-  present: FALSE
-  -----------------------------------------
-  Vref: 1.1
-  -----------------------------------------
-  change settings? y/n
-
-  */
+  Serial.print("Node Address: ");
+  Serial.println(nodeAddress);
+  Serial.println("-----------------------------------------");
+  Serial.println("DS18B20 Sensors");
+  Serial.print("Number of sensors: ");
+  Serial.println(numberOfSensors);
+  printSavedDS18Addresses();
+  Serial.println("-----------------------------------------");
+  Serial.print("Vref: ");
+  Serial.println(iREF);
+  Serial.println("-----------------------------------------");
+  Serial.println("Interval: not set");
+  Serial.println("-----------------------------------------");
+  Serial.println("Humidity sensor");
+  Serial.println("Present: false");
+  Serial.println("-----------------------------------------");
+  Serial.println("Scale sensor");
+  Serial.println("Present: false");
+  Serial.println("-----------------------------------------");
+  Serial.println();
+  Serial.println();
+  Serial.println();
+  delay(2000);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 // SETUP AND LOOP //////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////
-
 void setup() {
   Serial.begin(38400);
 #ifdef DEBUG
   while (!Serial) {
-    ; // wait for serial port to connect. Needed for native USB port only
+    ; // wait for serial port not to miss data when starting serial monitor
     // leave out when debug is not defined
   }
 #endif
-
-  initNode();
-  initTempSensors();
-  // Serial.println("-addresses in
-  // eeprom---------------------------------------");
-  printSavedDS18Addresses();
-  // Serial.println("-addressess in
-  // array---------------------------------------");
-  printLoadedDS18Addresses();
-  Serial.println("----------------------------------------");
-  setupRadio();
+  initNode();        // start node
+  initTempSensors(); // load and start temp sensors
+  // initOtherThins - I2C sensors,scale, ...
+  initRadio(); // start radio
+  // load all setting if needed
+  // - not for now
+  // print settings data
+  printConfig();
 }
 
 void loop() {
+  // Config //////////////////////////////////////////////////////////////
   // check if button is pressed. if so loop tgrough lookForNewDS18Sensors
   while (digitalRead(configButton) == LOW)
     lookForNewDS18Sensors();
@@ -382,17 +365,21 @@ void loop() {
     printConfig();
     firstTimeThroughSaveLoop = true;
   }
-
-  // measure and send
-  Serial.print("battery voltage: ");
-  Serial.println(battery.getVoltage());
-  getTemperatures();
-  /*  getTemperatures(&beeNodeData); // Struct?
-  Serial.println();
-  Serial.println("---------------------------------------------------------");
-  print_temp_struct(&beeNodeData);
-  Serial.println("---------------------------------------------------------");
-  */
-  sendStuff();
+  // measure and send ////////////////////////////////////////////////////
+  // fill struct
+  collectData(&payload);
+  // display data in struct
+  showData(&payload);
+  // send struct
+  bool sendSuccesfull = sendData(&payload, sizeof(payload));
+  // display send result
+  #ifdef DEBUG
+  if (sendSuccesfull)
+    DEBUG_PRINTLN("Send succesfull");
+  else
+    DEBUG_PRINTLN("Send error!");
+  DEBUG_PRINTLN();
+  #endif
+  // sleep to be implemented
   delay(2000);
 }
