@@ -32,7 +32,7 @@
 #define oneWirePin 5
 
 // node specific declarations //
-//NodeData_t beeNodeData; --------------------
+// NodeData_t beeNodeData; --------------------
 uint8_t nodeAddress = 1;
 
 // EEPROM address locations //
@@ -48,6 +48,11 @@ RandomNodeId beeNodeId;
 #include "MesureVoltageInternal.h"
 float iREF = 1.1;
 MesureVoltageInternal battery(iREF);
+
+// Low Power
+#include <LowPower.h>
+int sleepInterval = 10;
+int sleepcycle = 2;
 
 // One wire definitions //
 #include <DallasTemperature.h>
@@ -68,12 +73,6 @@ bool firstTimeThroughSaveLoop = true; // remove line above
 RF24 radio(7, 8); // create object to control and communicate with nRF24L01
 RF24Network network(radio); // Create object to use nRF24L01 in mesh network
 const uint16_t rXNode = 00; // address of coordinator
-// structure used to hold the payload that is sent to the coordinator.
-struct payload_example_t {
-  float aDCTemp; // temperature from onboard sensor
-  bool batState; // bool to communicate battery power level, true is good and
-                 // false means battery needs to be replaced
-};
 
 // structure used to hold the payload that is sent to the coordinator.
 struct payload_t {
@@ -117,7 +116,9 @@ void showData(payload_t *payloadAddress) {
   Serial.println();
 }
 
-bool sendData(payload_t *payloadAddress, int sizeOfPayload) { //<---------------------------- should edit it to accept
+bool sendData(payload_t *payloadAddress,
+              int sizeOfPayload) { //<---------------------------- should edit
+                                   //it to accept
   // pointer to struct as well, probably ad it with & in function
   // header en remove the & within the function
   network.update(); // check to see if there is any network traffic that needs
@@ -140,15 +141,15 @@ uint8_t getNodeAdress() {
   pinMode(addressPin2, INPUT_PULLUP);
   pinMode(addressPin3, INPUT_PULLUP);
   uint8_t address = 0;
-    if (digitalRead(addressPin1) == LOW) {
-      address = address + 1;
-    }
-    if (digitalRead(addressPin2) == LOW) {
-      address = address + 2;
-    }
-    if (digitalRead(addressPin3) == LOW) {
-      address = address + 3;
-    }
+  if (digitalRead(addressPin1) == LOW) {
+    address = address + 1;
+  }
+  if (digitalRead(addressPin2) == LOW) {
+    address = address + 2;
+  }
+  if (digitalRead(addressPin3) == LOW) {
+    address = address + 3;
+  }
   if (address == 0)
     address = 1;
   return address;
@@ -365,21 +366,26 @@ void loop() {
     printConfig();
     firstTimeThroughSaveLoop = true;
   }
+
+
   // measure and send ////////////////////////////////////////////////////
   // fill struct
   collectData(&payload);
   // display data in struct
   showData(&payload);
   // send struct
+  radio.powerUp();
   bool sendSuccesfull = sendData(&payload, sizeof(payload));
-  // display send result
-  #ifdef DEBUG
+  radio.powerDown();
+// display send result
+#ifdef DEBUG
   if (sendSuccesfull)
     DEBUG_PRINTLN("Send succesfull");
   else
     DEBUG_PRINTLN("Send error!");
   DEBUG_PRINTLN();
-  #endif
+#endif
   // sleep to be implemented
-  delay(2000);
+for(int i; i<sleepcycle; i++)
+  LowPower.powerDown(SLEEP_8S, ADC_OFF, BOD_OFF);
 }
