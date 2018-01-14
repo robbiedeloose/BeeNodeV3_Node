@@ -118,7 +118,7 @@ void showData(payload_t *payloadAddress) {
 
 bool sendData(payload_t *payloadAddress,
               int sizeOfPayload) { //<---------------------------- should edit
-                                   //it to accept
+                                   // it to accept
   // pointer to struct as well, probably ad it with & in function
   // header en remove the & within the function
   network.update(); // check to see if there is any network traffic that needs
@@ -301,91 +301,123 @@ void initRadio() { //
   network.begin(90, nodeAddress);
 }
 
-////////////////////////////////////////////////////////////////////////////////
-void printConfig() {
-  Serial.println("BeeNode v3.0.1a Node");
-  Serial.println("-----------------------------------------");
-  Serial.print("Node Id: ");
-  for (byte b : nodeId)
-    Serial.print(b, HEX);
-  Serial.println();
-  Serial.print("Node Address: ");
-  Serial.println(nodeAddress);
-  Serial.println("-----------------------------------------");
-  Serial.println("DS18B20 Sensors");
-  Serial.print("Number of sensors: ");
-  Serial.println(numberOfSensors);
-  printSavedDS18Addresses();
-  Serial.println("-----------------------------------------");
-  Serial.print("Vref: ");
-  Serial.println(iREF);
-  Serial.println("-----------------------------------------");
-  Serial.println("Interval: not set");
-  Serial.println("-----------------------------------------");
-  Serial.println("Humidity sensor");
-  Serial.println("Present: false");
-  Serial.println("-----------------------------------------");
-  Serial.println("Scale sensor");
-  Serial.println("Present: false");
-  Serial.println("-----------------------------------------");
-  Serial.println();
-  Serial.println();
-  Serial.println();
-  delay(2000);
+bool checkResponse() {
+  if (Serial.available() > 0) {
+    char receivedChar = Serial.read();
+    if (receivedChar == 'y') {
+      Serial.println("YES");
+      return true;
+    } else {
+      Serial.println("NO");
+      return false;
+    }
+  }
+  return false;
 }
 
-////////////////////////////////////////////////////////////////////////////////
-// SETUP AND LOOP //////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////////////////////////
-void setup() {
-  Serial.begin(38400);
+bool getAnswer() {
+   while (!Serial.available()) { }
+   if(Serial.read() == 'Y') return true;
+   else return false;
+}
+
+void getNewSettings()
+{
+  Serial.println(F("Change DeviceAddress? y/n"));
+  if(getAnswer()){;}
+}
+  ////////////////////////////////////////////////////////////////////////////////
+  void printConfig() {
+    Serial.println("BeeNode v3.0.1a Node");
+    Serial.println("-----------------------------------------");
+    Serial.print("Node Id: ");
+    for (byte b : nodeId)
+      Serial.print(b, HEX);
+    Serial.println();
+    Serial.print("Node Address: ");
+    Serial.println(nodeAddress);
+    Serial.println("-----------------------------------------");
+    Serial.println("DS18B20 Sensors");
+    Serial.print("Number of sensors: ");
+    Serial.println(numberOfSensors);
+    printSavedDS18Addresses();
+    Serial.println("-----------------------------------------");
+    Serial.print("Vref: ");
+    Serial.println(iREF);
+    Serial.println("-----------------------------------------");
+    Serial.println("Interval: not set");
+    Serial.println("-----------------------------------------");
+    Serial.println("Humidity sensor");
+    Serial.println("Present: false");
+    Serial.println("-----------------------------------------");
+    Serial.println("Scale sensor");
+    Serial.println("Present: false");
+    Serial.println("-----------------------------------------");
+    Serial.print("Change setting? y/n");
+    for (int i = 0; i < 20; i++) {
+      Serial.print(".");
+      if (checkResponse() == true){
+        getNewSettings();
+        break;
+        }
+      delay(500);
+    }
+    Serial.println();
+    Serial.println();
+  }
+
+  ////////////////////////////////////////////////////////////////////////////////
+  // SETUP AND LOOP
+  // //////////////////////////////////////////////////////////////
+  ////////////////////////////////////////////////////////////////////////////////
+  void setup() {
+    Serial.begin(38400);
 #ifdef DEBUG
-  while (!Serial) {
-    ; // wait for serial port not to miss data when starting serial monitor
-    // leave out when debug is not defined
-  }
+    while (!Serial) {
+      ; // wait for serial port not to miss data when starting serial monitor
+      // leave out when debug is not defined
+    }
 #endif
-  initNode();        // start node
-  initTempSensors(); // load and start temp sensors
-  // initOtherThins - I2C sensors,scale, ...
-  initRadio(); // start radio
-  // load all setting if needed
-  // - not for now
-  // print settings data
-  printConfig();
-}
-
-void loop() {
-  // Config //////////////////////////////////////////////////////////////
-  // check if button is pressed. if so loop tgrough lookForNewDS18Sensors
-  while (digitalRead(configButton) == LOW)
-    lookForNewDS18Sensors();
-  // load sensors if we went through search loop and quit
-  if (!firstTimeThroughSaveLoop) {
-    loadDS18Addresses();
+    initNode();        // start node
+    initTempSensors(); // load and start temp sensors
+    // initOtherThins - I2C sensors,scale, ...
+    initRadio(); // start radio
+    // load all setting if needed
+    // - not for now
+    // print settings data
     printConfig();
-    firstTimeThroughSaveLoop = true;
   }
 
+  void loop() {
+    // Config //////////////////////////////////////////////////////////////
+    // check if button is pressed. if so loop tgrough lookForNewDS18Sensors
+    while (digitalRead(configButton) == LOW)
+      lookForNewDS18Sensors();
+    // load sensors if we went through search loop and quit
+    if (!firstTimeThroughSaveLoop) {
+      loadDS18Addresses();
+      printConfig();
+      firstTimeThroughSaveLoop = true;
+    }
 
-  // measure and send ////////////////////////////////////////////////////
-  // fill struct
-  collectData(&payload);
-  // display data in struct
-  showData(&payload);
-  // send struct
-  radio.powerUp();
-  bool sendSuccesfull = sendData(&payload, sizeof(payload));
-  radio.powerDown();
+    // measure and send ////////////////////////////////////////////////////
+    // fill struct
+    collectData(&payload);
+    // display data in struct
+    showData(&payload);
+    // send struct
+    radio.powerUp();
+    bool sendSuccesfull = sendData(&payload, sizeof(payload));
+    radio.powerDown();
 // display send result
 #ifdef DEBUG
-  if (sendSuccesfull)
-    DEBUG_PRINTLN("Send succesfull");
-  else
-    DEBUG_PRINTLN("Send error!");
-  DEBUG_PRINTLN();
+    if (sendSuccesfull)
+      DEBUG_PRINTLN("Send succesfull");
+    else
+      DEBUG_PRINTLN("Send error!");
+    DEBUG_PRINTLN();
 #endif
-  // sleep to be implemented
-for(int i; i<sleepcycle; i++)
-  LowPower.powerDown(SLEEP_8S, ADC_OFF, BOD_OFF);
-}
+    // sleep to be implemented
+    for (int i; i < sleepcycle; i++)
+      LowPower.powerDown(SLEEP_8S, ADC_OFF, BOD_OFF);
+  }
