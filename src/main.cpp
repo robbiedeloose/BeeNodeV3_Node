@@ -34,11 +34,13 @@
 // node specific declarations //
 // NodeData_t beeNodeData; --------------------
 uint8_t nodeAddress = 1;
+uint8_t nodeMode = 1;
 
 // EEPROM address locations //
 #include <EEPROM.h>      //EEPROM functions
 #define EEPRomDeviceId 1 // 1 byte for #, 4 bytes for ID
-#define EEPRomDs18Ids 6  // 48 bytes for 6 addresses, 8 bytes each
+#define EEPRomOptions 6
+#define EEPRomDs18Ids 16 // 48 bytes for 6 addresses, 8 bytes each
 uint8_t nodeId[4];
 
 // own libraries //
@@ -51,7 +53,7 @@ MesureVoltageInternal battery(iREF);
 
 // Low Power
 #include <LowPower.h>
-int sleepInterval = 10;
+uint8_t sleepInterval = 10;
 int sleepcycle = 2;
 
 // One wire definitions //
@@ -63,10 +65,10 @@ int waitForConversion = 200;
 OneWire oneWire(oneWirePin);
 DallasTemperature sensors(&oneWire);
 DeviceAddress tempDeviceAddress; // temporary addresses to save found sensor to
-#define numberOfSensors 3
-uint8_t deviceAddresses[numberOfSensors][8]; // address aray
-int foundDevices = 0; // Number of temperature devices found
-float temperatures[numberOfSensors];
+uint8_t numberOfSensors = 3;
+uint8_t deviceAddresses[6][8]; // address aray
+int foundDevices = 0;          // Number of temperature devices found
+float temperatures[6];
 bool firstTimeThroughSaveLoop = true; // remove line above
 
 // RF24 declarations //
@@ -77,7 +79,7 @@ const uint16_t rXNode = 00; // address of coordinator
 // structure used to hold the payload that is sent to the coordinator.
 struct payload_t {
   uint8_t id[4];
-  float temp[numberOfSensors];
+  float temp[6];
   float bat;
 };
 payload_t payload; // Payload to send
@@ -316,108 +318,215 @@ bool checkResponse() {
 }
 
 bool getAnswer() {
-   while (!Serial.available()) { }
-   if(Serial.read() == 'Y') return true;
-   else return false;
+  while (!Serial.available()) {
+  }
+  if (Serial.read() == 'y')
+    return true;
+  else
+    return false;
 }
 
-void getNewSettings()
-{
-  Serial.println(F("Change DeviceAddress? y/n"));
-  if(getAnswer()){;}
+void saveSettings() {
+  DEBUG_PRINTLN("saving settings");
+  EEPROM.put(EEPRomOptions, 0xFF);
+  EEPROM.put(EEPRomOptions + 1, numberOfSensors);
+  EEPROM.put(EEPRomOptions + 2, sleepInterval);
+  EEPROM.put(EEPRomOptions + 3, numberOfSensors);
+  EEPROM.put(EEPRomOptions + 4, iREF);
+  EEPROM.put(EEPRomOptions + 8, nodeMode);
 }
-  ////////////////////////////////////////////////////////////////////////////////
-  void printConfig() {
-    Serial.println("BeeNode v3.0.1a Node");
-    Serial.println("-----------------------------------------");
-    Serial.print("Node Id: ");
-    for (byte b : nodeId)
+void loadSettings() {
+  DEBUG_PRINTLN(EEPROM.read(EEPRomOptions));
+  if (EEPROM.read(EEPRomOptions) == 0xFF) {
+    DEBUG_PRINTLN("loading settings");
+    EEPROM.get(EEPRomOptions + 1, numberOfSensors);
+    EEPROM.get(EEPRomOptions + 2, sleepInterval);
+    EEPROM.get(EEPRomOptions + 3, numberOfSensors);
+    EEPROM.get(EEPRomOptions + 4, iREF);
+    EEPROM.get(EEPRomOptions + 8, nodeMode);
+  }
+}
+
+void getNewSettings() {
+  //// Set DeviceId ///////////////
+  /////////////////////////////////
+  Serial.println(F("Change DeviceAddress? y/n"));
+  if (getAnswer()) {
+    // if we pressed YES
+    Serial.println(F("Enter address per byte in decimal format: "));
+    byte id[4];
+    for (int i = 0; i < 4; i++) {
+      while (!Serial.available())
+        ;
+      int val = Serial.parseInt();
+      id[i] = char(val);
+      Serial.println("next byte please");
+    }
+    Serial.print("new address: ");
+    for (byte b : id)
       Serial.print(b, HEX);
     Serial.println();
-    Serial.print("Node Address: ");
-    Serial.println(nodeAddress);
-    Serial.println("-----------------------------------------");
-    Serial.println("DS18B20 Sensors");
-    Serial.print("Number of sensors: ");
-    Serial.println(numberOfSensors);
-    printSavedDS18Addresses();
-    Serial.println("-----------------------------------------");
-    Serial.print("Vref: ");
-    Serial.println(iREF);
-    Serial.println("-----------------------------------------");
-    Serial.println("Interval: not set");
-    Serial.println("-----------------------------------------");
-    Serial.println("Humidity sensor");
-    Serial.println("Present: false");
-    Serial.println("-----------------------------------------");
-    Serial.println("Scale sensor");
-    Serial.println("Present: false");
-    Serial.println("-----------------------------------------");
-    Serial.print("Change setting? y/n");
-    for (int i = 0; i < 20; i++) {
-      Serial.print(".");
-      if (checkResponse() == true){
-        getNewSettings();
-        break;
-        }
-      delay(500);
-    }
-    Serial.println();
-    Serial.println();
+    Serial.println(F("Is this correct? y/n"));
+    if (getAnswer())
+      // save address to eeprom
+      beeNodeId.setId(id);
+  } else {
+    // other key is pressed
   }
 
-  ////////////////////////////////////////////////////////////////////////////////
-  // SETUP AND LOOP
-  // //////////////////////////////////////////////////////////////
-  ////////////////////////////////////////////////////////////////////////////////
-  void setup() {
-    Serial.begin(38400);
+  //// Set number of sensors ////////
+  ///////////////////////////////////
+  Serial.println(F("Change number of sensors? y/n"));
+  if (getAnswer()) {
+    // if we pressed YES
+    Serial.println(F("Enter 3 or 6: Not possible now"));
+    while (!Serial.available()) {
+    }
+    int tSensors = Serial.parseInt();
+    if (tSensors == 3 || tSensors == 6)
+      numberOfSensors = (uint8_t)tSensors;
+    ;
+  } else {
+    // other key is pressed
+  }
+
+  //// set Interval
+  Serial.println(F("Change interval? y/n"));
+  if (getAnswer()) {
+    // if we pressed YES
+    Serial.println(F("Enter interval in minutes (max 240)"));
+    while (!Serial.available()) {
+    }
+    int tInterv = Serial.parseInt();
+    if (tInterv >= 1 && tInterv <= 240)
+      sleepInterval = (byte)tInterv;
+
+  } else {
+  }
+
+  //// set vref
+  Serial.println(F("Change Vref? y/n"));
+  if (getAnswer()) {
+    // if we pressed YES
+    Serial.println(F("Give vref between 1.0 and 1.2"));
+    while (!Serial.available()) {
+    }
+    float ref = Serial.parseFloat();
+    if (ref >= 1.0 && ref <= 1.2)
+      iREF = ref;
+  } else {
+    // other key is pressed
+    Serial.println(F("Out of range - ignored"));
+  }
+
+  Serial.println(F("Change Mode? y/n"));
+  if (getAnswer()) {
+    Serial.println(F("1: node, 2: router + node, 3: router"));
+    while (!Serial.available()) {
+      int tMode = Serial.parseInt();
+      if (tMode > 0 && tMode < 4)
+        nodeMode = (uint8_t)tMode;
+    }
+  } else {
+    // other key is pressed
+  }
+  saveSettings();
+  initNode();
+}
+////////////////////////////////////////////////////////////////////////////////
+void printConfig() {
+  Serial.println("BeeNode v3.0.1a Node");
+  Serial.println("-----------------------------------------");
+  Serial.print("Node Id: ");
+  for (byte b : nodeId)
+    Serial.print(b, HEX);
+  Serial.println();
+  Serial.print("Node Address: ");
+  Serial.println(nodeAddress);
+  Serial.println("-----------------------------------------");
+  Serial.println("DS18B20 Sensors");
+  Serial.print("Number of sensors: ");
+  Serial.println(numberOfSensors);
+  printSavedDS18Addresses();
+  Serial.println("-----------------------------------------");
+  Serial.print("Vref: ");
+  Serial.println(iREF);
+  Serial.println("-----------------------------------------");
+  Serial.println("Interval: not set");
+  Serial.println("-----------------------------------------");
+  Serial.println("Humidity sensor");
+  Serial.println("Present: false");
+  Serial.println("-----------------------------------------");
+  Serial.println("Scale sensor");
+  Serial.println("Present: false");
+  Serial.println("-----------------------------------------");
+  Serial.print("Change setting? y/n");
+  for (int i = 0; i < 20; i++) {
+    Serial.print(".");
+    if (checkResponse() == true) {
+      getNewSettings();
+      break;
+    }
+    delay(500);
+  }
+  Serial.println();
+  Serial.println();
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// SETUP AND LOOP
+// //////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+void setup() {
+  Serial.begin(38400);
 #ifdef DEBUG
-    while (!Serial) {
-      ; // wait for serial port not to miss data when starting serial monitor
-      // leave out when debug is not defined
-    }
-#endif
-    initNode();        // start node
-    initTempSensors(); // load and start temp sensors
-    // initOtherThins - I2C sensors,scale, ...
-    initRadio(); // start radio
-    // load all setting if needed
-    // - not for now
-    // print settings data
-    printConfig();
+  while (!Serial) {
+    ; // wait for serial port not to miss data when starting serial monitor
+    // leave out when debug is not defined
   }
+#endif
+  loadSettings();
+  initNode();        // start node
+  initTempSensors(); // load and start temp sensors
+  // initOtherThins - I2C sensors,scale, ...
+  initRadio(); // start radio
+  // load all setting if needed
+  // - not for now
+  // print settings data
+  printConfig();
+}
 
-  void loop() {
-    // Config //////////////////////////////////////////////////////////////
-    // check if button is pressed. if so loop tgrough lookForNewDS18Sensors
-    while (digitalRead(configButton) == LOW)
-      lookForNewDS18Sensors();
-    // load sensors if we went through search loop and quit
-    if (!firstTimeThroughSaveLoop) {
-      loadDS18Addresses();
-      printConfig();
-      firstTimeThroughSaveLoop = true;
-    }
+void loop() {
+  // Config //////////////////////////////////////////////////////////////
+  // check if button is pressed. if so loop tgrough lookForNewDS18Sensors
+  while (digitalRead(configButton) == LOW)
+    lookForNewDS18Sensors();
+  // load sensors if we went through search loop and quit
+  if (!firstTimeThroughSaveLoop) {
+    loadDS18Addresses();
+    printConfig();
+    firstTimeThroughSaveLoop = true;
+  } ///////////////////////////////////////////////////////////////////////
 
-    // measure and send ////////////////////////////////////////////////////
-    // fill struct
-    collectData(&payload);
-    // display data in struct
-    showData(&payload);
-    // send struct
-    radio.powerUp();
-    bool sendSuccesfull = sendData(&payload, sizeof(payload));
-    radio.powerDown();
+  // fill struct
+  collectData(&payload);
+#ifdef DEBUG
+  // display data in struct
+  showData(&payload);
+#endif
+  // send struct
+  radio.powerUp();
+  bool sendSuccesfull = sendData(&payload, sizeof(payload));
+  radio.powerDown();
 // display send result
 #ifdef DEBUG
-    if (sendSuccesfull)
-      DEBUG_PRINTLN("Send succesfull");
-    else
-      DEBUG_PRINTLN("Send error!");
-    DEBUG_PRINTLN();
+  if (sendSuccesfull)
+    DEBUG_PRINTLN("Send succesfull");
+  else
+    DEBUG_PRINTLN("Send error!");
+  DEBUG_PRINTLN();
 #endif
-    // sleep to be implemented
-    for (int i; i < sleepcycle; i++)
-      LowPower.powerDown(SLEEP_8S, ADC_OFF, BOD_OFF);
-  }
+  // sleep to be implemented
+  for (int i; i < sleepcycle; i++)
+    LowPower.powerDown(SLEEP_8S, ADC_OFF, BOD_OFF);
+}

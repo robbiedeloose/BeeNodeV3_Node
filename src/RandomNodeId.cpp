@@ -24,3 +24,9 @@ void RandomNodeId::getId(byte *address) {
     EEPROM.write(1, '#');
   }
 }
+
+void RandomNodeId::setId(byte *address){
+  for (int i = 0; i < 4; i++) {
+     EEPROM.write(i + 2, address[i]);
+    // Serial.print(nodeId[i], HEX);
+}}
