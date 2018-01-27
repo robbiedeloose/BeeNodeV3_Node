@@ -1,3 +1,17 @@
+/*
+
+still to add:
+ variable for resolution + change of wait --> sleep?
+ variable for coordinator
+ variable radio powerUp
+
+features to add:
+ scale
+ humidity
+
+*/
+#include <arduino.h>
+
 #define DEBUG
 
 #ifdef DEBUG
@@ -10,8 +24,6 @@
 #define DEBUG_PRINTDEC(x)
 #define DEBUG_PRINTLN(x)
 #endif
-
-#include <arduino.h>
 
 #include "BeeNode.h"
 
@@ -79,8 +91,11 @@ const uint16_t rXNode = 00; // address of coordinator
 // structure used to hold the payload that is sent to the coordinator.
 struct payload_t {
   uint8_t id[4];
-  float temp[6];
-  float bat;
+  int temp[6];
+  int bat;
+  int weight;
+  uint8_t humidity;
+  uint8_t alarm;
 };
 payload_t payload; // Payload to send
 
@@ -92,8 +107,10 @@ void collectData(payload_t *payloadAddress) {
   sensors.requestTemperatures(); // Send the command to get temperatures
   delay(waitForConversion);
   for (uint8_t a = 0; a < numberOfSensors; a++) // temperature values
-    payloadAddress->temp[a] = sensors.getTempC(deviceAddresses[a]);
-  payloadAddress->bat = battery.getVoltage(); // Battery
+    payloadAddress->temp[a] = sensors.getTempC(deviceAddresses[a]) * 100;
+  payloadAddress->bat = battery.getVoltage() * 100; // Battery
+  payloadAddress->weight = 8888;
+  payloadAddress->humidity = 123;
 }
 
 void showData(payload_t *payloadAddress) {
@@ -108,13 +125,15 @@ void showData(payload_t *payloadAddress) {
     Serial.print("temp : ");
     Serial.print(i + 1);
     Serial.print(": ");
-    if (payloadAddress->temp[i] != -127.00)
-      Serial.println(payloadAddress->temp[i]);
+    if (payloadAddress->temp[i] != -12700)
+      Serial.println((float)payloadAddress->temp[i] / 100);
     else
       Serial.println("not present");
   }
   Serial.print("Battery: ");
-  Serial.println(payloadAddress->bat); // Show battery info
+  Serial.println((float)payloadAddress->bat / 100); // Show battery info
+  Serial.print("Alarm state: ");
+  Serial.println(payloadAddress->alarm);
   Serial.println();
 }
 
@@ -168,6 +187,7 @@ void loadDS18Addresses() {
 }
 
 void clearDS18Addresses() {
+  DEBUG_PRINTLN("Clearing ds addresses");
   int startByte = EEPRomDs18Ids;
   for (int a = 0; a < numberOfSensors; a++) {
     for (int i = 0; i < 8; i++) {
@@ -251,13 +271,19 @@ bool checkAndSaveDS18Address(DeviceAddress tempAddress) {
 
 // config mode enables saving of addresses to eeprom
 void lookForNewDS18Sensors() {
+  DEBUG_PRINTLN("lookForNewDS18Sensors");
   digitalWrite(ledPin, HIGH); // keep led high while we look for new sensors
   // clear the addresses if you go through scan for first time
-  if (firstTimeThroughSaveLoop)
+  if (firstTimeThroughSaveLoop) {
+
     clearDS18Addresses();
+    DEBUG_PRINTLN("Start sensors");
+  }
 
   sensors.begin();
   foundDevices = sensors.getDeviceCount();
+  DEBUG_PRINT("devices found: ");
+  DEBUG_PRINTLN(foundDevices);
   for (int i = 0; i < foundDevices; i++) {
     if (sensors.getAddress(tempDeviceAddress, i)) {
       if (checkAndSaveDS18Address(tempDeviceAddress)) // if found address is
@@ -275,6 +301,11 @@ void lookForNewDS18Sensors() {
   digitalWrite(ledPin, LOW); // turn led low if we leave the function
 }
 
+void alarmTriggered() {
+  // Just a handler for the pin interrupt.
+  payload.alarm = 1;
+}
+
 // INIT FUNCTIONS //////////////////////////////////////////////////////////////
 void initNode() {
   // Set pinmodes for config mode
@@ -285,6 +316,10 @@ void initNode() {
   nodeAddress = getNodeAdress();
   // Set voltage reference
   battery.setRefInternal();
+  sleepcycle = sleepInterval * 60 / 8;
+
+  pinMode(alarmPin, INPUT_PULLUP);
+  payload.alarm = 0;
 }
 
 void initTempSensors() {
@@ -296,6 +331,7 @@ void initTempSensors() {
 void initRadio() { //
   SPI.begin();     // Start SPI communication
   radio.begin();   // start nRF24L01 communication and control
+  radio.setPALevel(HIGH);
   // radio.setRetries(0,0);
   // setup network communication, first argument is channel which determines
   // frequency band module communicates on. Second argument is address of this
@@ -307,10 +343,10 @@ bool checkResponse() {
   if (Serial.available() > 0) {
     char receivedChar = Serial.read();
     if (receivedChar == 'y') {
-      Serial.println("YES");
+      // Serial.println("YES");
       return true;
     } else {
-      Serial.println("NO");
+      // Serial.println("NO");
       return false;
     }
   }
@@ -328,7 +364,7 @@ bool getAnswer() {
 
 void saveSettings() {
   DEBUG_PRINTLN("saving settings");
-  EEPROM.put(EEPRomOptions, 0xFF);
+  EEPROM.put(EEPRomOptions, 0x88);
   EEPROM.put(EEPRomOptions + 1, numberOfSensors);
   EEPROM.put(EEPRomOptions + 2, sleepInterval);
   EEPROM.put(EEPRomOptions + 3, numberOfSensors);
@@ -337,13 +373,16 @@ void saveSettings() {
 }
 void loadSettings() {
   DEBUG_PRINTLN(EEPROM.read(EEPRomOptions));
-  if (EEPROM.read(EEPRomOptions) == 0xFF) {
+  if (EEPROM.read(EEPRomOptions) != 0xFF) {
     DEBUG_PRINTLN("loading settings");
+    delay(5000);
     EEPROM.get(EEPRomOptions + 1, numberOfSensors);
     EEPROM.get(EEPRomOptions + 2, sleepInterval);
     EEPROM.get(EEPRomOptions + 3, numberOfSensors);
     EEPROM.get(EEPRomOptions + 4, iREF);
     EEPROM.get(EEPRomOptions + 8, nodeMode);
+  } else {
+    DEBUG_PRINTLN("settings not saved");
   }
 }
 
@@ -452,7 +491,11 @@ void printConfig() {
   Serial.print("Vref: ");
   Serial.println(iREF);
   Serial.println("-----------------------------------------");
-  Serial.println("Interval: not set");
+  Serial.print("Interval: ");
+  Serial.print(sleepInterval);
+  Serial.print(" (");
+  Serial.print(sleepcycle);
+  Serial.println(" cycles of 8 seconds)");
   Serial.println("-----------------------------------------");
   Serial.println("Humidity sensor");
   Serial.println("Present: false");
@@ -515,9 +558,9 @@ void loop() {
   showData(&payload);
 #endif
   // send struct
-  radio.powerUp();
+
   bool sendSuccesfull = sendData(&payload, sizeof(payload));
-  radio.powerDown();
+
 // display send result
 #ifdef DEBUG
   if (sendSuccesfull)
@@ -526,7 +569,19 @@ void loop() {
     DEBUG_PRINTLN("Send error!");
   DEBUG_PRINTLN();
 #endif
-  // sleep to be implemented
+  delay(5000);
+  // if mode = 1
+  // SLeep
+  radio.powerDown();
+  if (payload.alarm == 1)
+    delay(5000);
+  attachInterrupt(1, alarmTriggered, LOW);
+  payload.alarm = 0;
   for (int i; i < sleepcycle; i++)
     LowPower.powerDown(SLEEP_8S, ADC_OFF, BOD_OFF);
+  detachInterrupt(1);
+
+  radio.powerUp();
+
+  // if mode = 2
 }
