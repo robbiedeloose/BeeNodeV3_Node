@@ -25,6 +25,11 @@ features to add:
 #define DEBUG_PRINTLN(x)
 #endif
 
+#include "SparkFunHTU21D.h"
+#include <Wire.h>
+// Create an instance of the object
+HTU21D myHumidity;
+
 #include "BeeNode.h"
 
 #include <RF24.h> //Library for nRF24L01, using version https://github.com/TMRh20/RF24
@@ -91,10 +96,10 @@ const uint16_t rXNode = 00; // address of coordinator
 // structure used to hold the payload that is sent to the coordinator.
 struct payload_t {
   uint8_t id[4];
-  int temp[6];
-  int bat;
-  int weight;
-  uint8_t humidity;
+  int16_t temp[6];
+  uint16_t bat;
+  uint16_t weight;
+  uint16_t humidity;
   uint8_t alarm;
 };
 payload_t payload; // Payload to send
@@ -110,13 +115,13 @@ void collectData(payload_t *payloadAddress) {
     payloadAddress->temp[a] = sensors.getTempC(deviceAddresses[a]) * 100;
   payloadAddress->bat = battery.getVoltage() * 100; // Battery
   payloadAddress->weight = 8888;
-  payloadAddress->humidity = 123;
+  payloadAddress->humidity = myHumidity.readHumidity() * 10;
 }
 
 void showData(payload_t *payloadAddress) {
   Serial.print("Device Id: "); // Show devide id
   for (uint8_t i = 0; i < 4; i++)
-    Serial.print(nodeId[i]);
+    Serial.print(nodeId[i], HEX);
   Serial.println();
   Serial.print("Device Address: ");
   Serial.println(nodeAddress); // Show device address
@@ -130,6 +135,8 @@ void showData(payload_t *payloadAddress) {
     else
       Serial.println("not present");
   }
+  Serial.print("Humidity: ");
+  Serial.println((float)payloadAddress->humidity / 10);
   Serial.print("Battery: ");
   Serial.println((float)payloadAddress->bat / 100); // Show battery info
   Serial.print("Alarm state: ");
@@ -320,6 +327,8 @@ void initNode() {
 
   pinMode(alarmPin, INPUT_PULLUP);
   payload.alarm = 0;
+
+  myHumidity.begin();
 }
 
 void initTempSensors() {
