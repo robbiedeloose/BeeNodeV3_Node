@@ -111,8 +111,12 @@ void collectData(payload_t *payloadAddress) {
     payloadAddress->id[i] = nodeId[i];
   sensors.requestTemperatures(); // Send the command to get temperatures
   delay(waitForConversion);
-  for (uint8_t a = 0; a < numberOfSensors; a++) // temperature values
+  for (uint8_t a = 0; a < numberOfSensors; a++) {
+    // temperature values
     payloadAddress->temp[a] = sensors.getTempC(deviceAddresses[a]) * 100;
+    if (payloadAddress->temp[a] == -12700)
+      payloadAddress->temp[a] = 9;
+  }
   payloadAddress->bat = battery.getVoltage() * 100; // Battery
   payloadAddress->weight = 8888;
   payloadAddress->humidity = myHumidity.readHumidity() * 10;
